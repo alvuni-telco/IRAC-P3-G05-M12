@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dash.js Metrics with Chart.js</title>
+    <script src="dash.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+        }
+        canvas {
+            max-width: 50%;
+            max-height: 50%;
+        }
+    </style>
+</head>
+<body>
+
+<video class="dashjs-player" autoplay controls preload="auto" muted></video>
+
+<div>
+    <p>Video Bitrate: <span id="bitrate">N/A</span></p>
+    <p>Video Buffer: <span id="buffer">N/A</span></p>
+    <p>Video Representation: <span id="representation">N/A</span></p>
+</div>
+
+<canvas id="metricsChart" width="800" height="400"></canvas>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        init();
+    });
+
+    let chart;
+    const bufferData = [];
+    const bitrateData = [];
+    const labels = [];
+
+    function initChart() {
+        const ctx = document.getElementById('metricsChart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Buffer Level',
+                        data: bufferData,
+                        yAxisID: 'y',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        fill: false,
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    },
+                    {
+                        label: 'Bitrate',
+                        data: bitrateData,
+                        yAxisID: 'y1',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        fill: false,
+                        tension: 0.1,
+                        pointRadius: 2,
+                        borderWidth: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Buffer Level (s)'
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Bitrate (kbps)'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true
+                    }
+                }
+            }
+        });
+    }
+
+    function init() {
+        const video = document.querySelector("video");
+        const mpd_url = "./output/stream.mpd";
+
+        const protData = {
+            "org.w3.clearkey": {
+                "clearkeys": {
+                    "oW5AK5BW43HzbTSKpiu3SQ": "hyN9IKGfWKdAwFaE5pm0qg"
+                }
+            }
+        };
+
+        var player = dashjs.MediaPlayer().create();
+        player.initialize(video, mpd_url, true);
+        player.setProtectionData(protData);
+
+        initChart();
+
+        player.on(dashjs.MediaPlayer.events.PLAYBACK_ENDED, () => {
+            clearInterval(eventPoller);
+        });
+
+        var eventPoller = setInterval(() => {
+            var stream = player.getActiveStream();
+            var streamInfo = stream ? stream.getStreamInfo() : null;
+            var dashMetrics = player.getDashMetrics();
+            var dashAdapter = player.getDashAdapter();
+
+            if (!dashMetrics || !streamInfo) return;
+
+            const periodIdx = streamInfo.index;
+            var repSwitch = dashMetrics.getCurrentRepresentationSwitch('video', true);
+            var bufferLevel = dashMetrics.getCurrentBufferLevel('video');
+            let bitrate = NaN;
+
+            if (repSwitch && repSwitch.to) {
+                var repId = repSwitch.to;
+                bitrate = Math.round(dashAdapter.getBandwidthForRepresentation(repId, periodIdx) / 1000);
+                document.getElementById('representation').innerText = repId;
+            } else {
+                document.getElementById('representation').innerText = "N/A";
+            }
+
+            document.getElementById('bitrate').innerText = isNaN(bitrate) ? "N/A" : bitrate + " kbps";
+            document.getElementById('buffer').innerText = bufferLevel ? bufferLevel.toFixed(2) + " secs" : "N/A";
+
+            // Add data to chart
+            const now = new Date().toLocaleTimeString();
+            labels.push(now);
+            bufferData.push(bufferLevel);
+            bitrateData.push(bitrate);
+
+            if (labels.length > 20) {
+                labels.shift();
+                bufferData.shift();
+                bitrateData.shift();
+            }
+
+            chart.update();
+        }, 1000);
+    }
+</script>
+
+</body>
+</html>
